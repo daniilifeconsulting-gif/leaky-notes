@@ -15,11 +15,17 @@ Two flaws are planted here:
 import sqlite3
 
 from flask import Flask, g, jsonify, request
+from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE = "leaky.db"
 
 app = Flask(__name__)
 
+def hash_password(password: str) -> str:
+    return generate_password_hash(password, method="pbkdf2:sha256")
+
+def verify_password(stored_hash: str, candidate: str) -> bool:
+    return check_password_hash(stored_hash, candidate)
 
 def get_db():
     if "db" not in g:
@@ -46,27 +52,34 @@ def register():
         # FLAW 1: the password is written straight to the database as plaintext.
         db.execute(
             "INSERT INTO users (username, password) VALUES (?, ?)",
-            (username, password),
+            (username, hash_password(password)),
         )
         db.commit()
     except sqlite3.IntegrityError:
         return jsonify({"error": "username taken"}), 409
-    return jsonify({"message": f"registered {username}"}), 201
+    return jsonify({"username": username}), 201
+
 
 
 @app.post("/login")
 def login():
     data = request.get_json(silent=True) or {}
     username, password = data.get("username"), data.get("password")
+
+    # Optional: basic validation similar to /register
+    if not username or not password:
+        return jsonify({"error": "username and password required"}), 400
+
     row = get_db().execute(
         "SELECT * FROM users WHERE username = ?", (username,)
     ).fetchone()
-    # FLAW 1 (cont.): plaintext comparison, because the stored value is plaintext.
-    if row is None or row["password"] != password:
+
+    # Generic failure: do NOT reveal whether username or password was wrong
+    if row is None or not verify_password(row["password"], password):
         return jsonify({"error": "bad credentials"}), 401
-    # A "token" that is just the user id in the clear. Not how real auth works;
-    # good enough to demonstrate the authorization flaw below.
-    return jsonify({"token": f"user-{row['id']}"}), 200
+
+    # Successful login: return authenticated identity (no token yet)
+    return jsonify({"username": row["username"]}), 200
 
 
 def current_user_id():
@@ -132,4 +145,4 @@ def delete_note(note_id):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    app.run(debug=True, port=5002)
