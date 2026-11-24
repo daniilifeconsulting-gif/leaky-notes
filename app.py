@@ -49,9 +49,9 @@ def register():
         return jsonify({"error": "username and password required"}), 400
     db = get_db()
     try:
-        # FLAW 1: the password is written straight to the database as plaintext.
+        # Store only the hashed password, never plaintext.
         db.execute(
-            "INSERT INTO users (username, password) VALUES (?, ?)",
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
             (username, hash_password(password)),
         )
         db.commit()
@@ -75,7 +75,7 @@ def login():
     ).fetchone()
 
     # Generic failure: do NOT reveal whether username or password was wrong
-    if row is None or not verify_password(row["password"], password):
+    if row is None or not verify_password(row["password_hash"], password):
         return jsonify({"error": "bad credentials"}), 401
 
     # Successful login: return authenticated identity (no token yet)
