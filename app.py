@@ -14,12 +14,22 @@ Two flaws are planted here:
 
 import sqlite3
 
+import jwt
+from datetime import datetime, timedelta, timezone
+
+
 from flask import Flask, g, jsonify, request
 from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE = "leaky.db"
 
 app = Flask(__name__)
+
+
+import os
+
+app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY")
+
 
 def hash_password(password: str) -> str:
     return generate_password_hash(password, method="pbkdf2:sha256")
@@ -78,8 +88,28 @@ def login():
     if row is None or not verify_password(row["password_hash"], password):
         return jsonify({"error": "bad credentials"}), 401
 
-    # Successful login: return authenticated identity (no token yet)
-    return jsonify({"username": row["username"]}), 200
+    
+    # Create a signed JWT after successful authentication
+    now = datetime.now(timezone.utc)
+
+    payload = {
+        "sub": str(row["id"]),
+        "username": row["username"],
+        "iat": now,
+        "exp": now + timedelta(minutes=30),
+    }
+
+    secret = app.config["JWT_SECRET_KEY"]
+    if not secret:
+        return jsonify({"error": "JWT signing key not configured"}), 500
+
+    token = jwt.encode(payload, secret, algorithm="HS256")
+
+    return jsonify({
+        "username": row["username"],
+        "token": token
+    }), 200
+
 
 
 def current_user_id():
